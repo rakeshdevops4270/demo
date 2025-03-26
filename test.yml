@@ -1,0 +1,37 @@
+trigger: none
+
+stages:
+  - stage: Build
+    displayName: 'Build Stage'
+    variables:
+      - name: buildRepo
+        value: 'project1/build-repo'
+    jobs:
+      - template: templates/build-stage.yml
+        parameters:
+          repoName: $(buildRepo)
+          buildParam: 'Release'
+
+  - stage: Test
+    displayName: 'Test Stage'
+    dependsOn: Build
+    variables:
+      - name: testRepo
+        value: 'project2/test-repo'
+    jobs:
+      - template: templates/test-stage.yml
+        parameters:
+          repoName: $(testRepo)
+          testLevel: 'Integration'
+
+  - stage: Deploy
+    displayName: 'Deploy Stage'
+    dependsOn: Test
+    variables:
+      - name: deployRepo
+        value: 'project3/deploy-repo'
+    jobs:
+      - template: templates/deploy-stage.yml
+        parameters:
+          repoName: $(deployRepo)
+          environment: 'production'
