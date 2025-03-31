@@ -1,0 +1,46 @@
+trigger: none
+
+resources:
+  repositories:
+    - repository: repo1
+      type: git
+      name: 31963-voip-mt
+    - repository: repo2
+      type: git
+      name: 31963-non-voip-mt
+    - repository: repo3
+      type: git
+      name: 31963-common-modules
+
+stages:
+  - stage: VOIP_MT
+    displayName: VOIP Infra
+    variables:
+      - name: repoName
+        value: repo1
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/mtns/automation'))
+    jobs:
+      - template: templates/main-infra-template.yml@repo3
+        parameters:
+          region: 'eastus2'
+          environment: 'nprd'
+          repoName: $(repoName)
+          runStorage: true
+          runPlan: true
+          runApply: true
+
+  - stage: NONVOIP_MT
+    displayName: Non-VOIP Infra
+    variables:
+      - name: repoName
+        value: repo2
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/mtns/automation'))
+    jobs:
+      - template: templates/main-infra-template.yml@repo3
+        parameters:
+          region: 'westus2'
+          environment: 'prod'
+          repoName: $(repoName)
+          runStorage: false
+          runPlan: true
+          runApply: true
