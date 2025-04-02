@@ -1,20 +1,29 @@
 import os
-import subprocess
+import sys
+import zipfile
+import argparse
 from pathlib import Path
 
-def find_tool(source_directory, search_app):
-    for root, dirs, files in os.walk(source_directory):
-        if search_app in files:
-            tool_path = os.path.join(root, search_app)
-            print(f"{search_app} tool found here: {tool_path}")
-            return tool_path
-    print(f"{search_app} not found.")
-    return None
+def extract_zip_file(zip_path, output_dir):
+    """Extract a ZIP-format file (.msix/.msixbundle) to the specified directory."""
+    print(f"📦 Extracting {zip_path} to {output_dir}")
+    os.makedirs(output_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(output_dir)
+
+def copy_file(src_path, dest_path):
+    """Manually copy a file without using shutil."""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    with open(src_path, 'rb') as src_file, open(dest_path, 'wb') as dest_file:
+        dest_file.write(src_file.read())
 
 def find_env_file(extract_path):
+    """Find and process MSIX bundle files, and scan for .env files."""
     msix_bundle_path = None
     msix_bundle_name = None
-    for root, dirs, files in os.walk(extract_path):
+
+    # Search for .msixbundle files
+    for root, _, files in os.walk(extract_path):
         for file in files:
             if file.endswith(".msixbundle") and ("x64" in file or "ARM64" in file):
                 msix_bundle_path = root
@@ -24,58 +33,56 @@ def find_env_file(extract_path):
             break
 
     if not msix_bundle_path or not msix_bundle_name:
-        print("No MSIX bundle found.")
+        print("No matching .msixbundle file found.")
         return
 
     msix_bundle_file = os.path.join(msix_bundle_path, msix_bundle_name)
-    msix_bundle_new_directory = os.path.join(msix_bundle_path, msix_bundle_name)
-    os.makedirs(msix_bundle_new_directory, exist_ok=True)
-    subprocess.run([zip_app, "x", msix_bundle_file, f"-o{msix_bundle_new_directory}", "-aoa"], check=True)
+    msix_bundle_extract_dir = os.path.join(msix_bundle_path, msix_bundle_name.replace(".msixbundle", ""))
+    extract_zip_file(msix_bundle_file, msix_bundle_extract_dir)
 
-    msix_path = None
-    msix_name = None
-    for root, dirs, files in os.walk(msix_bundle_new_directory):
+    # Look for .msix file inside the extracted .msixbundle
+    msix_file_path = None
+    for root, _, files in os.walk(msix_bundle_extract_dir):
         for file in files:
             if file.endswith(".msix") and ("x64" in file or "ARM64" in file):
-                msix_path = root
-                msix_name = file
+                msix_file_path = os.path.join(root, file)
                 break
-        if msix_path:
+        if msix_file_path:
             break
 
-    if not msix_path or not msix_name:
-        print("No MSIX file found.")
+    if not msix_file_path:
+        print("No matching .msix file found inside the bundle.")
         return
 
-    msix_file = os.path.join(msix_path, msix_name)
-    msix_new_directory = os.path.join(msix_bundle_new_directory, msix_name.replace(".msix", ""))
-    msix_new_directory = f"\\\\?\\{msix_new_directory}"
-    subprocess.run([zip_app, "x", msix_file, f"-o{msix_new_directory}", "-aoa"], check=True)
+    msix_extract_dir = os.path.join(msix_bundle_extract_dir, Path(msix_file_path).stem)
+    extract_zip_file(msix_file_path, msix_extract_dir)
 
-    msix_temp_directory = os.path.join(os.environ.get("BUILD_SOURCESDIRECTORY", ""), "msix_temp")
-    os.makedirs(msix_temp_directory, exist_ok=True)
-    subprocess.run(["cp", "-r", f"{msix_new_directory}/*", msix_temp_directory], check=True)
+    # Define temporary directory
+    temp_dir = os.path.join(extract_path, "msix_temp")
+    os.makedirs(temp_dir, exist_ok=True)
 
-    print(f"Copied contents of {msix_new_directory} to {msix_temp_directory}")
+    # Manually copy files to temp_dir for path simplification
+    for item in Path(msix_extract_dir).rglob("*"):
+        if item.is_file():
+            relative_path = item.relative_to(msix_extract_dir)
+            target_path = Path(temp_dir) / relative_path
+            copy_file(str(item), str(target_path))
 
-    env_files = list(Path(msix_temp_directory).rglob("*.env"))
+    print(f"📁 Copied contents of {msix_extract_dir} to {temp_dir}")
+
+    # Look for .env files
+    env_files = list(Path(temp_dir).rglob("*.env"))
 
     if env_files:
-        for env_file in env_files:
-            print(f".env file found at: {env_file}")
-            exit(1)
+        for file in env_files:
+            print(f" .env file found at: {file}")
+        sys.exit(1)
     else:
-        print(f"No .env file found in the directory: {msix_temp_directory}")
+        print(f"✅ No .env file found in the directory: {temp_dir}")
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(description="Search for .env files in an MSIX bundle.")
-    parser.add_argument("extract_path", type=str, help="The path where the MSIX bundle is extracted.")
+    parser.add_argument("extract_path", type=str, help="The path where the MSIX bundle is located.")
     args = parser.parse_args()
-
-    zip_app = find_tool("/usr/bin", "7z")
-    if not zip_app:
-        exit(1)
 
     find_env_file(args.extract_path)
